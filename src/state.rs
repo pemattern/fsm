@@ -5,14 +5,38 @@ pub trait State<T> {
 }
 
 pub trait Transition<T, S1: IntoState<S2> + State<T>, S2: State<T>> {
-    fn transition(&self, into: S2, shared: &mut T) -> impl State<T>;
+    fn transition(&self, into: S2, shared: &mut T) -> NextState<T, S2>;
 }
 
 impl<T, S1: IntoState<S2> + State<T>, S2: State<T>> Transition<T, S1, S2> for S1 {
-    fn transition(&self, into: S2, shared: &mut T) -> impl State<T> {
+    fn transition(&self, into: S2, shared: &mut T) -> NextState<T, S2> {
         self.on_exit(shared);
         into.on_enter(shared);
-        into
+        NextState::new(into)
+    }
+}
+
+trait StateResult<T> {
+    fn process(self) -> impl State<T>;
+}
+
+impl<T, S: State<T>> StateResult<T> for NextState<T, S> {
+    fn process(self) -> impl State<T> {
+        self.state
+    }
+}
+
+struct NextState<T, S: State<T>> {
+    state: S,
+    marker: std::marker::PhantomData<T>,
+}
+
+impl<T, S: State<T>> NextState<T, S> {
+    pub fn new(state: S) -> Self {
+        Self {
+            state,
+            marker: std::marker::PhantomData,
+        }
     }
 }
 
@@ -34,7 +58,7 @@ impl<T, S: State<T>> StateMachine<T, S> {
     }
 
     pub fn send_event(&mut self) {
-        self.state.on_event(&mut self.shared).process();
+        let state_result = self.state.on_event(&mut self.shared);
     }
 }
 
@@ -42,21 +66,21 @@ impl<T, S: State<T>> StateMachine<T, S> {
 struct AppShared;
 struct RunState;
 impl State<AppShared> for RunState {
-    fn on_event(&self, shared: &mut AppShared) -> impl StateResult<AppShared> {
+    fn on_event(&self, shared: &mut AppShared) -> StateResult<AppShared> {
         self.transition(ExitState, shared)
     }
 }
 
 struct ExitState;
 impl State<AppShared> for ExitState {
-    fn on_event(&self, shared: &mut AppShared) -> impl StateResult<AppShared> {
+    fn on_event(&self, shared: &mut AppShared) -> StateResult<AppShared> {
         self.transition(RunState, shared)
     }
 }
 
 struct ResizeState;
 impl State<AppShared> for ResizeState {
-    fn on_event(&self, shared: &mut AppShared) -> impl StateResult<AppShared> {
+    fn on_event(&self, shared: &mut AppShared) -> StateResult<AppShared> {
         self.transition(RunState, shared)
     }
 }
